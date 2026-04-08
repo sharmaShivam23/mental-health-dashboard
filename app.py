@@ -182,26 +182,69 @@ elif page == "📝 2. Personal Wellness Tracker":
             st.error("Please enter both Name and Student ID to submit your assessment.")
         else:
             is_valid_submission = True
+            
+            # --- CORE LOGIC & ALGORITHMS ---
             burnout_risk = "Low"
             if stress_level == "High" and sleep_hours <= 5: burnout_risk = "High"
             elif stress_level in ["Medium", "High"] or study_hours >= 8: burnout_risk = "Moderate"
             
-            st.divider()
-            st.subheader(f"Your Burnout Risk: **{burnout_risk}**")
+            # Calculate Wellness Score (0-100)
+            base_score = 100
+            if stress_level == "High": base_score -= 30
+            elif stress_level == "Medium": base_score -= 10
+            if sleep_hours < 6: base_score -= 25
+            elif sleep_hours >= 8: base_score += 10
+            if study_hours > 8: base_score -= 15
+            wellness_score = max(0, min(100, base_score)) # Keeps score between 0 and 100
             
-            advice_text = ""
-            if burnout_risk == "High": 
-                advice_text = "🚨 You are at high risk of burnout! Please prioritize getting at least 7 hours of sleep."
-                st.error(advice_text)
-            elif burnout_risk == "Moderate": 
-                advice_text = "⚠️ You are pushing your limits. Don't forget to hydrate, schedule short breaks, and rest."
-                st.warning(advice_text)
-            else: 
-                advice_text = "✅ Great job maintaining a healthy academic and lifestyle balance!"
-                st.success(advice_text)
+            # Calculate Derived Metrics
+            sleep_deficit = max(0, 8.0 - sleep_hours)
+            study_sleep_ratio = round(study_hours / sleep_hours, 2) if sleep_hours > 0 else "Critical"
+
+            # --- DISPLAY PERSONALIZED DASHBOARD ---
+            st.divider()
+            st.markdown(f"### 🎯 Personalized Diagnostic for {student_name}")
+            
+            # 1. Health Meter
+            st.write("#### Overall Wellness Score")
+            st.progress(wellness_score / 100.0)
+            if wellness_score >= 80: st.success(f"**Score: {wellness_score}/100** - Excellent balance!")
+            elif wellness_score >= 50: st.warning(f"**Score: {wellness_score}/100** - Needs improvement.")
+            else: st.error(f"**Score: {wellness_score}/100** - Critical burnout warning.")
+            
+            st.write("")
+
+            # 2. Key Actionable Metrics
+            st.write("#### 📊 Specific Behavioral Metrics")
+            m1, m2, m3 = st.columns(3)
+            with m1:
+                m1.metric("Daily Sleep Deficit", f"{sleep_deficit} hrs", 
+                          delta=f"-{sleep_deficit} hours under ideal" if sleep_deficit > 0 else "Optimal Sleep", 
+                          delta_color="inverse" if sleep_deficit > 0 else "normal")
+            with m2:
+                m2.metric("Study-to-Sleep Ratio", f"{study_sleep_ratio}x", 
+                          help="Higher than 1.0 means you spend more time studying than sleeping! This is a fast track to burnout.")
+            with m3:
+                m3.metric("Calculated Burnout Risk", burnout_risk.upper(), 
+                          delta="Critical Warning" if burnout_risk=="High" else "Safe Zone", 
+                          delta_color="inverse" if burnout_risk in ["High", "Moderate"] else "normal")
+
+            st.write("")
+
+            # 3. Dynamic Peer Comparison (Using the Kaggle Dataset)
+            df_static = load_primary_data()
+            if df_static is not None:
+                st.write("#### 📈 Peer Comparison")
+                peer_avg_study = round(df_static[df_static['year'] == year]['daily_study_hours'].mean(), 1)
+                peer_avg_sleep = round(df_static[df_static['year'] == year]['daily_sleep_hours'].mean(), 1)
                 
-            # 1. SHOW THE CANDIDATE'S PERSONAL RESULT TABLE
-            st.markdown("#### 📋 Your Specific Assessment Results")
+                st.info(f"💡 **Data Insight:** You study **{study_hours} hours** daily, while the average {year} student studies **{peer_avg_study} hours**.")
+                st.info(f"💡 **Data Insight:** You sleep **{sleep_hours} hours** daily, while the average {year} student sleeps **{peer_avg_sleep} hours**.")
+                
+            st.write("")
+                
+            # 4. SHOW THE CANDIDATE'S PERSONAL RESULT TABLE
+            st.markdown("#### 📋 Your Raw Database Entry")
             personal_result_df = pd.DataFrame([{
                 "Name": student_name, "ID": student_id, "Gender": gender, "Year": year,
                 "Study Hours": study_hours, "Sleep Hours": sleep_hours, 
@@ -217,15 +260,22 @@ elif page == "📝 2. Personal Wellness Tracker":
             }])
             new_entry.to_csv(LIVE_FILE, mode='a', header=False, index=False)
             
-            # Prepare Report
-            report_content = f"""--- MENTAL HEALTH & WELLNESS REPORT ---
+            # Prepare Upgraded Report
+            report_content = f"""--- OFFICIAL WELLNESS DIAGNOSTIC REPORT ---
 Name: {student_name}
 ID: {student_id}
-Gender: {gender} | Year: {year}
-Study Hours: {study_hours} | Sleep Hours: {sleep_hours} | Stress: {stress_level}
+Year: {year} | Gender: {gender}
 
-RESULT: Burnout Risk Level: {burnout_risk.upper()}
-Recommendations: {advice_text}
+--- BEHAVIORAL METRICS ---
+Daily Study Hours: {study_hours}
+Daily Sleep Hours: {sleep_hours}
+Self-Reported Stress: {stress_level}
+
+--- CALCULATED ANALYTICS ---
+Wellness Score: {wellness_score}/100
+Sleep Deficit: {sleep_deficit} hours/day
+Study-to-Sleep Ratio: {study_sleep_ratio}x
+Burnout Risk Severity: {burnout_risk.upper()}
 
 Generated by the AKGEC Student Analytics System.
 """
@@ -241,7 +291,7 @@ Generated by the AKGEC Student Analytics System.
             
             # Show the Download Button here if they just submitted!
             if is_valid_submission:
-                st.success("Assessment Complete! Download your official report below:")
+                st.success("Assessment Complete! Download your official detailed report below:")
                 st.download_button(
                     label="📥 Download My Official Report", 
                     data=report_content, 
@@ -266,7 +316,6 @@ Generated by the AKGEC Student Analytics System.
             st.info("Submit the first entry above to generate the live table and pie chart!")
             
     except Exception as e:
-        # If there is an error reading the CSV, it will show up here instead of hiding!
         st.error(f"Could not load live database. Error: {e}")
 
 
