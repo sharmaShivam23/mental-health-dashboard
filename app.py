@@ -3,10 +3,10 @@ import pandas as pd
 import plotly.express as px
 import os
 
-
+# --- 1. SETUP ---
 st.set_page_config(page_title="Student Mental Health Analytics", layout="wide", page_icon="🎓")
 
-
+# --- CACHING ---
 @st.cache_data
 def load_primary_data():
     try:
@@ -21,7 +21,7 @@ def load_primary_data():
     except FileNotFoundError:
         return None
 
-
+# --- 2. SIDEBAR NAVIGATION ---
 st.sidebar.title("Navigation Menu")
 page = st.sidebar.radio("Go to:", [
     "📊 1. Pre-built Dashboard", 
@@ -42,26 +42,38 @@ if page == "📊 1. Pre-built Dashboard":
     
     if df_static is not None:
         
-      
-        st.sidebar.subheader("🎯 Filter Dashboard Data")
+        # --- INDIVIDUAL STUDENT LOOKUP ---
+        st.subheader("🔍 Individual Student Lookup")
+        st.write("Search for a specific student's mental health and academic profile.")
         
-       
+        search_id = st.text_input("Enter Student ID (e.g., 100001):")
+        if search_id:
+            try:
+                student_record = df_static[df_static['student_id'].astype(str) == str(search_id)]
+                if not student_record.empty:
+                    st.success(f"Record found for Student ID: {search_id}")
+                    st.dataframe(student_record)
+                else:
+                    st.warning("Student ID not found in the dataset.")
+            except KeyError:
+                st.error("The dataset does not contain a 'student_id' column.")
+                
+        st.divider()
+        
+        # --- SIDEBAR FILTERS ---
+        st.sidebar.subheader("🎯 Filter Dashboard Data")
         years = df_static['year'].dropna().unique()
         selected_years = st.sidebar.multiselect("Select Year of Study:", years, default=years)
         
-    
         genders = df_static['gender'].dropna().unique()
         selected_genders = st.sidebar.multiselect("Select Gender:", genders, default=genders)
         
-     
         filtered_df = df_static[(df_static['year'].isin(selected_years)) & (df_static['gender'].isin(selected_genders))]
         
         if filtered_df.empty:
-            st.warning("No data available for the selected filters. Please adjust your selection in the sidebar.")
+            st.warning("No data available for the selected filters.")
         else:
-            st.success(f"Showing data for {len(filtered_df)} students based on your filters!")
-            
-           
+            # --- KEY AVERAGES SCORECARD ---
             st.subheader("📌 Filtered Class Averages")
             
             col1, col2, col3, col4 = st.columns(4)
@@ -80,7 +92,7 @@ if page == "📊 1. Pre-built Dashboard":
                 
             st.divider()
             
-            
+            # --- VISUAL ANALYTICS ---
             st.subheader("📈 In-Depth Visual Analytics")
             
             c_left1, c_right1 = st.columns(2)
@@ -120,34 +132,36 @@ if page == "📊 1. Pre-built Dashboard":
                                       color_continuous_scale="Blues")
             st.plotly_chart(fig5, use_container_width=True)
             
-            # --- NEW: DOWNLOAD FILTERED DATA BUTTON ---
             st.divider()
             st.subheader("📥 Export Data")
-            st.write("Download the customized dataset based on your current sidebar filters.")
             csv_export = filtered_df.to_csv(index=False).encode('utf-8')
-            st.download_button(
-                label="Download Filtered CSV",
-                data=csv_export,
-                file_name='custom_student_data.csv',
-                mime='text/csv',
-            )
+            st.download_button("Download Filtered CSV", data=csv_export, file_name='custom_student_data.csv', mime='text/csv')
             
     else:
-        st.error(" Error: 'student_data.csv' not found. Please ensure it is in your project folder.")
+        st.error("🚨 Error: 'student_data.csv' not found.")
 
 # ==================================================
 # --- FEATURE 2: PERSONAL WELLNESS TRACKER ---
 # ==================================================
 elif page == "📝 2. Personal Wellness Tracker":
     st.title("📝 Personal Wellness Tracker")
-    st.write("Fill out the form to get personal insights. Your data will be added anonymously to the live database!")
+    st.write("Fill out the form to get personal insights. Your data will be added to the live database!")
     
     LIVE_FILE = "live_student_data.csv"
     
+    # Ensure database exists with correct columns
     if not os.path.exists(LIVE_FILE):
-        pd.DataFrame(columns=["Gender", "Year", "Study_Hours", "Sleep_Hours", "Stress_Level", "Burnout_Risk"]).to_csv(LIVE_FILE, index=False)
+        pd.DataFrame(columns=["Student_Name", "Student_ID", "Gender", "Year", "Study_Hours", "Sleep_Hours", "Stress_Level", "Burnout_Risk"]).to_csv(LIVE_FILE, index=False)
 
     with st.form("wellness_form"):
+        st.subheader("Student Identity")
+        id_col1, id_col2 = st.columns(2)
+        with id_col1:
+            student_name = st.text_input("Full Name")
+        with id_col2:
+            student_id = st.text_input("College / Student ID")
+            
+        st.subheader("Wellness Metrics")
         col1, col2 = st.columns(2)
         with col1:
             gender = st.selectbox("Gender", ["Male", "Female", "Other"])
@@ -158,68 +172,103 @@ elif page == "📝 2. Personal Wellness Tracker":
             stress_level = st.selectbox("Current Stress Level", ["Low", "Medium", "High"])
             
         submit = st.form_submit_button("Get Insights & Submit Data")
-        
+
+    is_valid_submission = False
+    report_content = ""
+
+    # Handles the CURRENT user who just clicked submit
     if submit:
-        # Core Logic
-        burnout_risk = "Low"
-        if stress_level == "High" and sleep_hours <= 5: burnout_risk = "High"
-        elif stress_level in ["Medium", "High"] or study_hours >= 8: burnout_risk = "Moderate"
-        
-        st.divider()
-        st.subheader(f"Your Burnout Risk: **{burnout_risk}**")
-        
-        advice_text = ""
-        if burnout_risk == "High": 
-            advice_text = "🚨 You are at high risk of burnout! Please prioritize getting at least 7 hours of sleep and consider taking a break from studying."
-            st.error(advice_text)
-        elif burnout_risk == "Moderate": 
-            advice_text = "⚠️ You are pushing your limits. Don't forget to hydrate, schedule short breaks, and rest."
-            st.warning(advice_text)
-        else: 
-            advice_text = " Great job maintaining a healthy academic and lifestyle balance!"
-            st.success(advice_text)
+        if not student_name or not student_id:
+            st.error("Please enter both Name and Student ID to submit your assessment.")
+        else:
+            is_valid_submission = True
+            burnout_risk = "Low"
+            if stress_level == "High" and sleep_hours <= 5: burnout_risk = "High"
+            elif stress_level in ["Medium", "High"] or study_hours >= 8: burnout_risk = "Moderate"
             
-        # Database Save
-        new_entry = pd.DataFrame([{"Gender": gender, "Year": year, "Study_Hours": study_hours, "Sleep_Hours": sleep_hours, "Stress_Level": stress_level, "Burnout_Risk": burnout_risk}])
-        new_entry.to_csv(LIVE_FILE, mode='a', header=False, index=False)
-        st.toast("Data saved to live database!")
-        
-        # --- NEW: DOWNLOAD PERSONAL REPORT BUTTON ---
-        report_content = f"""--- MENTAL HEALTH & WELLNESS REPORT ---
+            st.divider()
+            st.subheader(f"Your Burnout Risk: **{burnout_risk}**")
+            
+            advice_text = ""
+            if burnout_risk == "High": 
+                advice_text = "🚨 You are at high risk of burnout! Please prioritize getting at least 7 hours of sleep."
+                st.error(advice_text)
+            elif burnout_risk == "Moderate": 
+                advice_text = "⚠️ You are pushing your limits. Don't forget to hydrate, schedule short breaks, and rest."
+                st.warning(advice_text)
+            else: 
+                advice_text = "✅ Great job maintaining a healthy academic and lifestyle balance!"
+                st.success(advice_text)
+                
+            # 1. SHOW THE CANDIDATE'S PERSONAL RESULT TABLE
+            st.markdown("#### 📋 Your Specific Assessment Results")
+            personal_result_df = pd.DataFrame([{
+                "Name": student_name, "ID": student_id, "Gender": gender, "Year": year,
+                "Study Hours": study_hours, "Sleep Hours": sleep_hours, 
+                "Stress": stress_level, "Risk Level": burnout_risk
+            }])
+            st.dataframe(personal_result_df)
+            
+            # Save to CSV
+            new_entry = pd.DataFrame([{
+                "Student_Name": student_name, "Student_ID": student_id, "Gender": gender, 
+                "Year": year, "Study_Hours": study_hours, "Sleep_Hours": sleep_hours, 
+                "Stress_Level": stress_level, "Burnout_Risk": burnout_risk
+            }])
+            new_entry.to_csv(LIVE_FILE, mode='a', header=False, index=False)
+            
+            # Prepare Report
+            report_content = f"""--- MENTAL HEALTH & WELLNESS REPORT ---
+Name: {student_name}
+ID: {student_id}
+Gender: {gender} | Year: {year}
+Study Hours: {study_hours} | Sleep Hours: {sleep_hours} | Stress: {stress_level}
 
-Student Profile:
-- Gender: {gender}
-- Year of Study: {year}
-
-Daily Metrics:
-- Study Hours: {study_hours}
-- Sleep Hours: {sleep_hours}
-- Self-Reported Stress: {stress_level}
-
-ASSESSMENT RESULT:
-Burnout Risk Level: {burnout_risk.upper()}
+RESULT: Burnout Risk Level: {burnout_risk.upper()}
 Recommendations: {advice_text}
 
 Generated by the AKGEC Student Analytics System.
 """
-        st.download_button(
-            label="📥 Download My Official Report",
-            data=report_content,
-            file_name="My_Wellness_Report.txt",
-            mime="text/plain"
-        )
 
+    # 3. SHOW THE OVERALL CLASS PIE CHART & LIVE TABLE
     st.divider()
     st.subheader("Live Database Trends")
     try:
         df_live = pd.read_csv(LIVE_FILE)
+        
+        # Only draw if there is data inside the file
         if len(df_live) > 0:
-            fig_live = px.pie(df_live, names="Burnout_Risk", title="Class Burnout Distribution (Live)")
+            
+            # Show the Download Button here if they just submitted!
+            if is_valid_submission:
+                st.success("Assessment Complete! Download your official report below:")
+                st.download_button(
+                    label="📥 Download My Official Report", 
+                    data=report_content, 
+                    file_name=f"{student_id}_Wellness_Report.txt", 
+                    mime="text/plain"
+                )
+                st.write("") # Spacer
+
+            # Full Database Table
+            st.markdown("#### 📖 Full Student Health Directory")
+            st.write("Complete overview of all collected entries:")
+            st.dataframe(df_live) 
+            
+            st.write("") # Spacer
+
+            # Pie Chart
+            st.markdown("#### 🍩 Class Burnout Distribution")
+            fig_live = px.pie(df_live, names="Burnout_Risk", title="Live Ratio of Burnout Risk in the Class")
             st.plotly_chart(fig_live, use_container_width=True)
+            
         else:
-            st.info("Submit the first entry to see live charts!")
-    except:
-        pass
+            st.info("Submit the first entry above to generate the live table and pie chart!")
+            
+    except Exception as e:
+        # If there is an error reading the CSV, it will show up here instead of hiding!
+        st.error(f"Could not load live database. Error: {e}")
+
 
 # ============================================
 # --- FEATURE 3: CUSTOM DATA UPLOADER ---
@@ -234,11 +283,26 @@ elif page == "📁 3. Custom Data Uploader":
         df_upload = pd.read_csv(uploaded_file)
         st.success("File uploaded successfully!")
         
-        with st.expander("Preview Uploaded Data"):
+        st.subheader("🔍 Search Specific Record")
+        st.write("Search for a specific ID, Name, or value within your uploaded data.")
+        
+        columns = df_upload.columns.tolist()
+        search_col = st.selectbox("Select column to search by:", columns)
+        search_term = st.text_input(f"Enter value to search in '{search_col}':")
+        
+        if search_term:
+            filtered_upload = df_upload[df_upload[search_col].astype(str).str.contains(search_term, case=False, na=False)]
+            if not filtered_upload.empty:
+                st.dataframe(filtered_upload)
+            else:
+                st.warning("No matching records found.")
+        
+        st.divider()
+        
+        with st.expander("Preview Full Uploaded Data"):
             st.dataframe(df_upload.head())
             
         st.subheader("Build Your Own Chart")
-        columns = df_upload.columns.tolist()
         
         col1, col2 = st.columns(2)
         with col1:
@@ -249,4 +313,3 @@ elif page == "📁 3. Custom Data Uploader":
         if st.button("Generate Chart"):
             fig_custom = px.scatter(df_upload, x=x_axis, y=y_axis, title=f"{y_axis} vs {x_axis}")
             st.plotly_chart(fig_custom, use_container_width=True)
-            st.info("Tip: Try uploading different datasets to see how dynamic this tool is!")
