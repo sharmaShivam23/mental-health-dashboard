@@ -2,363 +2,667 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import os
+import sys
 
-# --- 1. SETUP ---
-st.set_page_config(page_title="Student Mental Health Analytics", layout="wide", page_icon="🎓")
+sys.path.insert(0, os.path.dirname(__file__))
+from utils.analysis import (
+    compute_full_analysis,
+    process_dataframe,
+    validate_teacher_csv,
+    compute_class_health_score,
+    generate_class_recommendations,
+    generate_auto_insights,
+    get_sample_csv,
+    LIVE_FILE_COLUMNS,
+)
 
-# --- CACHING ---
+# ---------------------------------------------------------------------------
+# CONFIG
+# ---------------------------------------------------------------------------
+st.set_page_config(
+    page_title="Student Mental Health Analytics",
+    layout="wide",
+    page_icon="🎓",
+)
+
+LIVE_FILE = "live_student_data.csv"
+
+# ---------------------------------------------------------------------------
+# HELPERS
+# ---------------------------------------------------------------------------
 @st.cache_data
 def load_primary_data():
     try:
         df = pd.read_csv("student_data.csv")
-        # Clean data silently
-        numeric_columns = ['cgpa', 'daily_study_hours', 'daily_sleep_hours', 'anxiety_score', 
-                           'depression_score', 'screen_time_hours', 'academic_pressure_score']
-        for col in numeric_columns:
+        numeric_cols = [
+            "cgpa", "daily_study_hours", "daily_sleep_hours",
+            "anxiety_score", "depression_score", "screen_time_hours",
+            "academic_pressure_score",
+        ]
+        for col in numeric_cols:
             if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce')
+                df[col] = pd.to_numeric(df[col], errors="coerce")
         return df
     except FileNotFoundError:
         return None
 
-# --- 2. SIDEBAR NAVIGATION ---
-st.sidebar.title("Navigation Menu")
+
+def ensure_live_file():
+    if not os.path.exists(LIVE_FILE):
+        pd.DataFrame(columns=LIVE_FILE_COLUMNS).to_csv(LIVE_FILE, index=False)
+
+
+def level_color(level):
+    return {"Low": "✅ Low", "Medium": "⚠️ Medium", "High": "🚨 High"}.get(level, level)
+
+
+# ---------------------------------------------------------------------------
+# SIDEBAR NAVIGATION
+# ---------------------------------------------------------------------------
+st.sidebar.title("🎓 Navigation")
 page = st.sidebar.radio("Go to:", [
-    "📊 1. Pre-built Dashboard", 
-    "📝 2. Personal Wellness Tracker", 
-    "📁 3. Custom Data Uploader"
+    "📊 1. Pre-built Dashboard",
+    "📝 2. Personal Wellness Tracker",
+    "👩‍🏫 3. Teacher Dashboard",
+    "📁 4. Custom Data Uploader",
 ])
 st.sidebar.divider()
 st.sidebar.info("Developed for Data Analysis Lab 💻")
 
-# ==========================================
-# --- FEATURE 1: PRE-BUILT DASHBOARD ---
-# ==========================================
+
+# ===========================================================================
+# PAGE 1 — PRE-BUILT DASHBOARD
+# ===========================================================================
 if page == "📊 1. Pre-built Dashboard":
     st.title("📊 Main Student Dashboard")
     st.write("Comprehensive analysis of our primary student mental health dataset.")
-    
+
     df_static = load_primary_data()
-    
-    if df_static is not None:
-        
-        # --- INDIVIDUAL STUDENT LOOKUP ---
-        st.subheader("🔍 Individual Student Lookup")
-        st.write("Search for a specific student's mental health and academic profile.")
-        
-        search_id = st.text_input("Enter Student ID (e.g., 100001):")
-        if search_id:
-            try:
-                student_record = df_static[df_static['student_id'].astype(str) == str(search_id)]
-                if not student_record.empty:
-                    st.success(f"Record found for Student ID: {search_id}")
-                    st.dataframe(student_record)
-                else:
-                    st.warning("Student ID not found in the dataset.")
-            except KeyError:
-                st.error("The dataset does not contain a 'student_id' column.")
-                
-        st.divider()
-        
-        # --- SIDEBAR FILTERS ---
-        st.sidebar.subheader("🎯 Filter Dashboard Data")
-        years = df_static['year'].dropna().unique()
-        selected_years = st.sidebar.multiselect("Select Year of Study:", years, default=years)
-        
-        genders = df_static['gender'].dropna().unique()
-        selected_genders = st.sidebar.multiselect("Select Gender:", genders, default=genders)
-        
-        filtered_df = df_static[(df_static['year'].isin(selected_years)) & (df_static['gender'].isin(selected_genders))]
-        
-        if filtered_df.empty:
-            st.warning("No data available for the selected filters.")
-        else:
-            # --- KEY AVERAGES SCORECARD ---
-            st.subheader("📌 Filtered Class Averages")
-            
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Total Students Analyzed", len(filtered_df))
-            col2.metric("Average CGPA", round(filtered_df['cgpa'].mean(), 2))
-            col3.metric("Avg Daily Study Hours", round(filtered_df['daily_study_hours'].mean(), 1))
-            col4.metric("Avg Daily Sleep Hours", round(filtered_df['daily_sleep_hours'].mean(), 1))
-                
-            st.write("") 
-            
-            col5, col6, col7, col8 = st.columns(4)
-            col5.metric("Avg Anxiety Score", round(filtered_df['anxiety_score'].mean(), 1))
-            col6.metric("Avg Depression Score", round(filtered_df['depression_score'].mean(), 1))
-            col7.metric("Avg Academic Pressure", round(filtered_df['academic_pressure_score'].mean(), 1))
-            col8.metric("Avg Screen Time (hrs)", round(filtered_df['screen_time_hours'].mean(), 1))
-                
-            st.divider()
-            
-            # --- VISUAL ANALYTICS ---
-            st.subheader("📈 In-Depth Visual Analytics")
-            
-            c_left1, c_right1 = st.columns(2)
-            with c_left1:
-                fig1 = px.histogram(filtered_df, x="gender", y="anxiety_score", color="gender", 
-                                    title="1. Average Anxiety by Gender", histfunc="avg", text_auto='.1f')
-                st.plotly_chart(fig1, use_container_width=True)
-                
-            with c_right1:
-                fig2 = px.scatter(filtered_df, x="daily_study_hours", y="cgpa", color="stress_level", 
-                                  title="2. Study Hours vs. CGPA (Colored by Stress)",
-                                  category_orders={"stress_level": ["Low", "Medium", "High"]})
-                st.plotly_chart(fig2, use_container_width=True)
 
-            c_left2, c_right2 = st.columns(2)
-            with c_left2:
-                fig3 = px.box(filtered_df, x="year", y="depression_score", color="year", 
-                              title="3. Depression Scores across Years of Study",
-                              category_orders={"year": ["1st", "2nd", "3rd", "4th"]})
-                st.plotly_chart(fig3, use_container_width=True)
-                
-            with c_right2:
-                sleep_df = filtered_df.dropna(subset=['sleep_quality', 'anxiety_score'])
-                sleep_anx = sleep_df.groupby('sleep_quality')['anxiety_score'].mean().reset_index()
-                fig4 = px.bar(sleep_anx, x='sleep_quality', y='anxiety_score', color='sleep_quality',
-                              title="4. How Sleep Quality Affects Average Anxiety",
-                              category_orders={"sleep_quality": ["Poor", "Average", "Good"]})
-                st.plotly_chart(fig4, use_container_width=True)
-                
-            st.write("")
-            st.markdown("#### 5. Academic Pressure vs. Reported Stress Levels")
-            
-            heatmap_df = filtered_df.dropna(subset=['academic_pressure_score', 'stress_level'])
-            fig5 = px.density_heatmap(heatmap_df, x="academic_pressure_score", y="stress_level", 
-                                      title="Heatmap: Academic Pressure vs. Stress Status",
-                                      category_orders={"stress_level": ["Low", "Medium", "High"]},
-                                      color_continuous_scale="Blues")
-            st.plotly_chart(fig5, use_container_width=True)
-            
-            st.divider()
-            st.subheader("📥 Export Data")
-            csv_export = filtered_df.to_csv(index=False).encode('utf-8')
-            st.download_button("Download Filtered CSV", data=csv_export, file_name='custom_student_data.csv', mime='text/csv')
-            
-    else:
-        st.error("🚨 Error: 'student_data.csv' not found.")
+    if df_static is None:
+        st.error("🚨 'student_data.csv' not found in the working directory.")
+        st.stop()
 
-# ==================================================
-# --- FEATURE 2: PERSONAL WELLNESS TRACKER ---
-# ==================================================
+    # Individual lookup
+    st.subheader("🔍 Individual Student Lookup")
+    search_id = st.text_input("Enter Student ID (e.g., 100001):")
+    if search_id:
+        try:
+            rec = df_static[df_static["student_id"].astype(str) == str(search_id)]
+            if not rec.empty:
+                st.success(f"Record found for Student ID: {search_id}")
+                st.dataframe(rec)
+            else:
+                st.warning("Student ID not found.")
+        except KeyError:
+            st.error("Dataset does not contain a 'student_id' column.")
+
+    st.divider()
+
+    # Sidebar filters
+    st.sidebar.subheader("🎯 Filter Dashboard Data")
+    years = df_static["year"].dropna().unique()
+    selected_years = st.sidebar.multiselect("Year of Study:", years, default=years)
+    genders = df_static["gender"].dropna().unique()
+    selected_genders = st.sidebar.multiselect("Gender:", genders, default=genders)
+
+    fdf = df_static[
+        df_static["year"].isin(selected_years) & df_static["gender"].isin(selected_genders)
+    ]
+
+    if fdf.empty:
+        st.warning("No data for selected filters.")
+        st.stop()
+
+    # Scorecards
+    st.subheader("📌 Filtered Class Averages")
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Students", len(fdf))
+    c2.metric("Avg CGPA", round(fdf["cgpa"].mean(), 2))
+    c3.metric("Avg Study Hrs", round(fdf["daily_study_hours"].mean(), 1))
+    c4.metric("Avg Sleep Hrs", round(fdf["daily_sleep_hours"].mean(), 1))
+
+    c5, c6, c7, c8 = st.columns(4)
+    c5.metric("Avg Anxiety", round(fdf["anxiety_score"].mean(), 1))
+    c6.metric("Avg Depression", round(fdf["depression_score"].mean(), 1))
+    c7.metric("Avg Academic Pressure", round(fdf["academic_pressure_score"].mean(), 1))
+    c8.metric("Avg Screen Time", round(fdf["screen_time_hours"].mean(), 1))
+
+    st.divider()
+
+    # Charts
+    st.subheader("📈 Visual Analytics")
+
+    cl1, cr1 = st.columns(2)
+    with cl1:
+        fig1 = px.histogram(
+            fdf, x="gender", y="anxiety_score", color="gender",
+            title="1. Average Anxiety by Gender", histfunc="avg", text_auto=".1f",
+        )
+        st.plotly_chart(fig1, use_container_width=True)
+    with cr1:
+        fig2 = px.scatter(
+            fdf, x="daily_study_hours", y="cgpa", color="stress_level",
+            title="2. Study Hours vs. CGPA (by Stress)",
+            category_orders={"stress_level": ["Low", "Medium", "High"]},
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+    cl2, cr2 = st.columns(2)
+    with cl2:
+        fig3 = px.box(
+            fdf, x="year", y="depression_score", color="year",
+            title="3. Depression Scores by Year",
+            category_orders={"year": ["1st", "2nd", "3rd", "4th"]},
+        )
+        st.plotly_chart(fig3, use_container_width=True)
+    with cr2:
+        s_df = fdf.dropna(subset=["sleep_quality", "anxiety_score"])
+        s_avg = s_df.groupby("sleep_quality")["anxiety_score"].mean().reset_index()
+        fig4 = px.bar(
+            s_avg, x="sleep_quality", y="anxiety_score", color="sleep_quality",
+            title="4. Sleep Quality vs. Avg Anxiety",
+            category_orders={"sleep_quality": ["Poor", "Average", "Good"]},
+        )
+        st.plotly_chart(fig4, use_container_width=True)
+
+    st.markdown("#### 5. Academic Pressure vs. Stress Level Heatmap")
+    hdf = fdf.dropna(subset=["academic_pressure_score", "stress_level"])
+    fig5 = px.density_heatmap(
+        hdf, x="academic_pressure_score", y="stress_level",
+        title="Academic Pressure vs. Stress",
+        category_orders={"stress_level": ["Low", "Medium", "High"]},
+        color_continuous_scale="Blues",
+    )
+    st.plotly_chart(fig5, use_container_width=True)
+
+    st.divider()
+    st.subheader("📥 Export")
+    st.download_button(
+        "Download Filtered CSV",
+        data=fdf.to_csv(index=False).encode("utf-8"),
+        file_name="filtered_student_data.csv",
+        mime="text/csv",
+    )
+
+
+# ===========================================================================
+# PAGE 2 — PERSONAL WELLNESS TRACKER
+# ===========================================================================
 elif page == "📝 2. Personal Wellness Tracker":
     st.title("📝 Personal Wellness Tracker")
-    st.write("Fill out the form to get personal insights. Your data will be added to the live database!")
-    
-    LIVE_FILE = "live_student_data.csv"
-    
-    # Ensure database exists with correct columns
-    if not os.path.exists(LIVE_FILE):
-        pd.DataFrame(columns=["Student_Name", "Student_ID", "Gender", "Year", "Study_Hours", "Sleep_Hours", "Stress_Level", "Burnout_Risk"]).to_csv(LIVE_FILE, index=False)
+    st.write("Complete the form to receive a personalised stress analysis. Your entry is saved to the live database.")
+
+    ensure_live_file()
 
     with st.form("wellness_form"):
-        st.subheader("Student Identity")
-        id_col1, id_col2 = st.columns(2)
-        with id_col1:
-            student_name = st.text_input("Full Name")
-        with id_col2:
-            student_id = st.text_input("College / Student ID")
-            
-        st.subheader("Wellness Metrics")
-        col1, col2 = st.columns(2)
-        with col1:
-            gender = st.selectbox("Gender", ["Male", "Female", "Other"])
-            year = st.selectbox("Year of Study", ["1st", "2nd", "3rd", "4th"])
-            study_hours = st.number_input("Daily Study Hours", min_value=0.0, max_value=24.0, value=4.0)
-        with col2:
-            sleep_hours = st.number_input("Daily Sleep Hours", min_value=0.0, max_value=24.0, value=6.0)
-            stress_level = st.selectbox("Current Stress Level", ["Low", "Medium", "High"])
-            
-        submit = st.form_submit_button("Get Insights & Submit Data")
+        st.subheader("👤 Student Identity")
+        id_c1, id_c2 = st.columns(2)
+        student_name = id_c1.text_input("Full Name")
+        student_id   = id_c2.text_input("College / Student ID")
 
-    is_valid_submission = False
+        st.subheader("📚 Academic Factors")
+        ac1, ac2, ac3 = st.columns(3)
+        study_hours    = ac1.number_input("Daily Study Hours", 0.0, 24.0, 4.0, 0.5)
+        assign_load    = ac2.slider("Assignment Load (1–10)", 1, 10, 5)
+        acad_pressure  = ac3.slider("Academic Pressure (1–10)", 1, 10, 5)
+
+        st.subheader("🌙 Lifestyle Factors")
+        lc1, lc2, lc3, lc4 = st.columns(4)
+        sleep_hours    = lc1.number_input("Daily Sleep Hours", 0.0, 24.0, 7.0, 0.5)
+        activity_hours = lc2.number_input("Physical Activity (hrs/day)", 0.0, 10.0, 1.0, 0.25)
+        diet_quality   = lc3.slider("Diet Quality (1–10)", 1, 10, 6)
+        screen_time    = lc4.number_input("Screen Time (hrs/day)", 0.0, 24.0, 3.0, 0.5)
+
+        st.subheader("🌃 Behavioral & Social Factors")
+        bc1, bc2, bc3, bc4, bc5 = st.columns(5)
+        late_night     = bc1.number_input("Late Night Usage (hrs past midnight)", 0.0, 8.0, 0.0, 0.5)
+        social_support = bc2.slider("Social Support (1–10)", 1, 10, 6)
+        loneliness     = bc3.slider("Loneliness Level (1–10)", 1, 10, 4)
+        self_esteem    = bc4.slider("Self-Esteem (1–10)", 1, 10, 6)
+        motivation     = bc5.slider("Motivation Level (1–10)", 1, 10, 6)
+
+        st.subheader("🗂️ Demographics")
+        dc1, dc2, dc3 = st.columns(3)
+        gender = dc1.selectbox("Gender", ["Male", "Female", "Other"])
+        year   = dc2.selectbox("Year of Study", ["1st", "2nd", "3rd", "4th"])
+
+        submitted = st.form_submit_button("🔍 Analyse My Wellness")
+
+    is_valid = False
     report_content = ""
 
-    # Handles the CURRENT user who just clicked submit
-    if submit:
+    if submitted:
         if not student_name or not student_id:
-            st.error("Please enter both Name and Student ID to submit your assessment.")
+            st.error("Please enter both Name and Student ID.")
         else:
-            is_valid_submission = True
-            
-            # --- CORE LOGIC & ALGORITHMS ---
-            burnout_risk = "Low"
-            if stress_level == "High" and sleep_hours <= 5: burnout_risk = "High"
-            elif stress_level in ["Medium", "High"] or study_hours >= 8: burnout_risk = "Moderate"
-            
-            # Calculate Wellness Score (0-100)
-            base_score = 100
-            if stress_level == "High": base_score -= 30
-            elif stress_level == "Medium": base_score -= 10
-            if sleep_hours < 6: base_score -= 25
-            elif sleep_hours >= 8: base_score += 10
-            if study_hours > 8: base_score -= 15
-            wellness_score = max(0, min(100, base_score)) # Keeps score between 0 and 100
-            
-            # Calculate Derived Metrics
-            sleep_deficit = max(0, 8.0 - sleep_hours)
-            study_sleep_ratio = round(study_hours / sleep_hours, 2) if sleep_hours > 0 else "Critical"
+            is_valid = True
+            form_data = {
+                "daily_study_hours":       study_hours,
+                "assignment_load":         assign_load,
+                "academic_pressure_score": acad_pressure,
+                "daily_sleep_hours":       sleep_hours,
+                "physical_activity_hours": activity_hours,
+                "diet_quality":            diet_quality,
+                "screen_time_hours":       screen_time,
+                "late_night_usage":        late_night,
+                "social_support":          social_support,
+                "loneliness_level":        loneliness,
+                "self_esteem":             self_esteem,
+                "motivation_level":        motivation,
+            }
 
-            # --- DISPLAY PERSONALIZED DASHBOARD ---
+            result = compute_full_analysis(form_data)
+            stress_score = result["stress_score"]
+            stress_level = result["stress_level"]
+            contributors = result["contributors"]
+            recs         = result["recommendations"]
+
             st.divider()
-            st.markdown(f"### 🎯 Personalized Diagnostic for {student_name}")
-            
-            # 1. Health Meter
-            st.write("#### Overall Wellness Score")
-            st.progress(wellness_score / 100.0)
-            if wellness_score >= 80: st.success(f"**Score: {wellness_score}/100** - Excellent balance!")
-            elif wellness_score >= 50: st.warning(f"**Score: {wellness_score}/100** - Needs improvement.")
-            else: st.error(f"**Score: {wellness_score}/100** - Critical burnout warning.")
-            
-            st.write("")
+            st.markdown(f"### 🎯 Personalised Diagnostic for **{student_name}**")
 
-            # 2. Key Actionable Metrics
-            st.write("#### 📊 Specific Behavioral Metrics")
-            m1, m2, m3 = st.columns(3)
-            with m1:
-                m1.metric("Daily Sleep Deficit", f"{sleep_deficit} hrs", 
-                          delta=f"-{sleep_deficit} hours under ideal" if sleep_deficit > 0 else "Optimal Sleep", 
-                          delta_color="inverse" if sleep_deficit > 0 else "normal")
-            with m2:
-                m2.metric("Study-to-Sleep Ratio", f"{study_sleep_ratio}x", 
-                          help="Higher than 1.0 means you spend more time studying than sleeping! This is a fast track to burnout.")
-            with m3:
-                m3.metric("Calculated Burnout Risk", burnout_risk.upper(), 
-                          delta="Critical Warning" if burnout_risk=="High" else "Safe Zone", 
-                          delta_color="inverse" if burnout_risk in ["High", "Moderate"] else "normal")
+            # Progress bar
+            st.write("#### Overall Stress Score")
+            st.progress(stress_score / 100.0)
+            if stress_level == "Low":
+                st.success(f"**Score: {stress_score}/100 — Low Stress.** Great balance!")
+            elif stress_level == "Medium":
+                st.warning(f"**Score: {stress_score}/100 — Medium Stress.** Some areas need attention.")
+            else:
+                st.error(f"**Score: {stress_score}/100 — High Stress.** Immediate self-care recommended.")
 
             st.write("")
 
-            # 3. Dynamic Peer Comparison (Using the Kaggle Dataset)
+            # Metrics row
+            m1, m2, m3, m4 = st.columns(4)
+            sleep_deficit = max(0, 8.0 - sleep_hours)
+            m1.metric("Stress Score", f"{stress_score}/100")
+            m2.metric("Stress Level", level_color(stress_level))
+            m3.metric("Sleep Deficit", f"{sleep_deficit:.1f} hrs/day",
+                      delta_color="inverse" if sleep_deficit > 0 else "normal")
+            study_sleep_ratio = round(study_hours / sleep_hours, 2) if sleep_hours > 0 else "N/A"
+            m4.metric("Study:Sleep Ratio", f"{study_sleep_ratio}x",
+                      help="Above 1.0 = studying more than sleeping.")
+
+            st.write("")
+
+            # Contributors
+            st.write("#### ⚠️ Stress Contributors")
+            for c in contributors:
+                st.warning(c)
+
+            st.write("")
+
+            # Recommendations
+            st.write("#### 💡 Personalised Recommendations")
+            for r in recs:
+                st.info(r)
+
+            st.write("")
+
+            # Peer comparison
             df_static = load_primary_data()
             if df_static is not None:
                 st.write("#### 📈 Peer Comparison")
-                peer_avg_study = round(df_static[df_static['year'] == year]['daily_study_hours'].mean(), 1)
-                peer_avg_sleep = round(df_static[df_static['year'] == year]['daily_sleep_hours'].mean(), 1)
-                
-                st.info(f"💡 **Data Insight:** You study **{study_hours} hours** daily, while the average {year} student studies **{peer_avg_study} hours**.")
-                st.info(f"💡 **Data Insight:** You sleep **{sleep_hours} hours** daily, while the average {year} student sleeps **{peer_avg_sleep} hours**.")
-                
+                peer_study = round(df_static[df_static["year"] == year]["daily_study_hours"].mean(), 1)
+                peer_sleep = round(df_static[df_static["year"] == year]["daily_sleep_hours"].mean(), 1)
+                st.info(f"💡 You study **{study_hours} hrs/day** vs. {year}-year peer avg of **{peer_study} hrs**.")
+                st.info(f"💡 You sleep **{sleep_hours} hrs/day** vs. {year}-year peer avg of **{peer_sleep} hrs**.")
+
             st.write("")
-                
-            # 4. SHOW THE CANDIDATE'S PERSONAL RESULT TABLE
-            st.markdown("#### 📋 Your Raw Database Entry")
-            personal_result_df = pd.DataFrame([{
+
+            # Raw entry preview
+            st.markdown("#### 📋 Your Database Entry")
+            preview_df = pd.DataFrame([{
                 "Name": student_name, "ID": student_id, "Gender": gender, "Year": year,
-                "Study Hours": study_hours, "Sleep Hours": sleep_hours, 
-                "Stress": stress_level, "Risk Level": burnout_risk
+                "Study Hrs": study_hours, "Sleep Hrs": sleep_hours,
+                "Stress Score": stress_score, "Stress Level": stress_level,
             }])
-            st.dataframe(personal_result_df)
-            
-            # Save to CSV
+            st.dataframe(preview_df)
+
+            # Persist to CSV
             new_entry = pd.DataFrame([{
-                "Student_Name": student_name, "Student_ID": student_id, "Gender": gender, 
-                "Year": year, "Study_Hours": study_hours, "Sleep_Hours": sleep_hours, 
-                "Stress_Level": stress_level, "Burnout_Risk": burnout_risk
+                "Student_Name": student_name, "Student_ID": student_id,
+                "Gender": gender, "Year": year,
+                "Study_Hours": study_hours, "Sleep_Hours": sleep_hours,
+                "Screen_Time": screen_time, "Assignment_Load": assign_load,
+                "Physical_Activity": activity_hours, "Diet_Quality": diet_quality,
+                "Social_Support": social_support, "Loneliness_Level": loneliness,
+                "Self_Esteem": self_esteem, "Motivation_Level": motivation,
+                "Late_Night_Usage": late_night,
+                "Stress_Score": stress_score, "Stress_Level": stress_level,
             }])
-            new_entry.to_csv(LIVE_FILE, mode='a', header=False, index=False)
-            
-            # Prepare Upgraded Report
+            new_entry.to_csv(LIVE_FILE, mode="a", header=False, index=False)
+
+            # Report text
             report_content = f"""--- OFFICIAL WELLNESS DIAGNOSTIC REPORT ---
-Name: {student_name}
-ID: {student_id}
-Year: {year} | Gender: {gender}
+Name: {student_name}  |  ID: {student_id}
+Year: {year}  |  Gender: {gender}
 
---- BEHAVIORAL METRICS ---
+--- ACADEMIC ---
 Daily Study Hours: {study_hours}
-Daily Sleep Hours: {sleep_hours}
-Self-Reported Stress: {stress_level}
+Assignment Load: {assign_load}/10
+Academic Pressure: {acad_pressure}/10
 
---- CALCULATED ANALYTICS ---
-Wellness Score: {wellness_score}/100
-Sleep Deficit: {sleep_deficit} hours/day
-Study-to-Sleep Ratio: {study_sleep_ratio}x
-Burnout Risk Severity: {burnout_risk.upper()}
+--- LIFESTYLE ---
+Daily Sleep Hours: {sleep_hours}
+Physical Activity: {activity_hours} hrs/day
+Diet Quality: {diet_quality}/10
+Screen Time: {screen_time} hrs/day
+Late Night Usage: {late_night} hrs past midnight
+
+--- SOCIAL & PSYCHOLOGICAL ---
+Social Support: {social_support}/10
+Loneliness: {loneliness}/10
+Self-Esteem: {self_esteem}/10
+Motivation: {motivation}/10
+
+--- RESULTS ---
+Stress Score: {stress_score}/100
+Stress Level: {stress_level}
+Sleep Deficit: {sleep_deficit:.1f} hrs/day
+Study:Sleep Ratio: {study_sleep_ratio}x
+
+--- CONTRIBUTORS ---
+{chr(10).join(contributors)}
+
+--- RECOMMENDATIONS ---
+{chr(10).join(recs)}
 
 Generated by the AKGEC Student Analytics System.
 """
 
-    # 3. SHOW THE OVERALL CLASS PIE CHART & LIVE TABLE
+    # Live database section
     st.divider()
-    st.subheader("Live Database Trends")
+    st.subheader("📊 Live Database Trends")
     try:
         df_live = pd.read_csv(LIVE_FILE)
-        
-        # Only draw if there is data inside the file
         if len(df_live) > 0:
-            
-            # Show the Download Button here if they just submitted!
-            if is_valid_submission:
-                st.success("Assessment Complete! Download your official detailed report below:")
+            if is_valid:
+                st.success("Assessment complete! Download your report below:")
                 st.download_button(
-                    label="📥 Download My Official Report", 
-                    data=report_content, 
-                    file_name=f"{student_id}_Wellness_Report.txt", 
-                    mime="text/plain"
+                    "📥 Download My Official Report",
+                    data=report_content,
+                    file_name=f"{student_id}_Wellness_Report.txt",
+                    mime="text/plain",
                 )
-                st.write("") # Spacer
+                st.write("")
 
-            # Full Database Table
             st.markdown("#### 📖 Full Student Health Directory")
-            st.write("Complete overview of all collected entries:")
-            st.dataframe(df_live) 
-            
-            st.write("") # Spacer
+            st.dataframe(df_live)
+            st.write("")
 
-            # Pie Chart
-            st.markdown("#### 🍩 Class Burnout Distribution")
-            fig_live = px.pie(df_live, names="Burnout_Risk", title="Live Ratio of Burnout Risk in the Class")
-            st.plotly_chart(fig_live, use_container_width=True)
-            
-        else:
-            st.info("Submit the first entry above to generate the live table and pie chart!")
-            
-    except Exception as e:
-        st.error(f"Could not load live database. Error: {e}")
-
-
-# ============================================
-# --- FEATURE 3: CUSTOM DATA UPLOADER ---
-# ============================================
-elif page == "📁 3. Custom Data Uploader":
-    st.title("📁 Custom Data Uploader")
-    st.write("Upload any CSV dataset. You can manually choose which columns to visualize!")
-    
-    uploaded_file = st.file_uploader("Drop your CSV file here", type=["csv"])
-    
-    if uploaded_file is not None:
-        df_upload = pd.read_csv(uploaded_file)
-        st.success("File uploaded successfully!")
-        
-        st.subheader("🔍 Search Specific Record")
-        st.write("Search for a specific ID, Name, or value within your uploaded data.")
-        
-        columns = df_upload.columns.tolist()
-        search_col = st.selectbox("Select column to search by:", columns)
-        search_term = st.text_input(f"Enter value to search in '{search_col}':")
-        
-        if search_term:
-            filtered_upload = df_upload[df_upload[search_col].astype(str).str.contains(search_term, case=False, na=False)]
-            if not filtered_upload.empty:
-                st.dataframe(filtered_upload)
+            st.markdown("#### 🍩 Class Stress Level Distribution")
+            if "Stress_Level" in df_live.columns:
+                fig_pie = px.pie(df_live, names="Stress_Level",
+                                 title="Live Stress Level Distribution",
+                                 color="Stress_Level",
+                                 color_discrete_map={"Low": "#2ecc71", "Medium": "#f39c12", "High": "#e74c3c"})
+                st.plotly_chart(fig_pie, use_container_width=True)
             else:
-                st.warning("No matching records found.")
-        
-        st.divider()
-        
-        with st.expander("Preview Full Uploaded Data"):
-            st.dataframe(df_upload.head())
-            
-        st.subheader("Build Your Own Chart")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            x_axis = st.selectbox("Choose X-Axis Column", columns)
-        with col2:
-            y_axis = st.selectbox("Choose Y-Axis Column", columns)
-            
-        if st.button("Generate Chart"):
-            fig_custom = px.scatter(df_upload, x=x_axis, y=y_axis, title=f"{y_axis} vs {x_axis}")
-            st.plotly_chart(fig_custom, use_container_width=True)
+                st.info("Stress data will appear after entries are submitted.")
+        else:
+            st.info("Submit the first entry above to generate live trends.")
+    except Exception as e:
+        st.error(f"Could not load live database: {e}")
+
+
+# ===========================================================================
+# PAGE 3 — TEACHER DASHBOARD
+# ===========================================================================
+elif page == "👩‍🏫 3. Teacher Dashboard":
+    st.title("👩‍🏫 Teacher Dashboard")
+    st.write("Upload your class roster CSV to get a comprehensive mental health analysis for your students.")
+
+    # Step 1 — Sample CSV
+    st.subheader("📥 Step 1: Download Sample CSV Template")
+    st.write("Use this template to prepare your class data with the required columns.")
+    st.download_button(
+        "⬇️ Download Sample CSV",
+        data=get_sample_csv(),
+        file_name="sample_class_data.csv",
+        mime="text/csv",
+    )
+
+    st.divider()
+
+    # Step 2 — Upload
+    st.subheader("📤 Step 2: Upload Your Class CSV")
+    uploaded = st.file_uploader("Upload CSV", type=["csv"], key="teacher_upload")
+
+    if uploaded is None:
+        st.info("Awaiting CSV upload…")
+        st.stop()
+
+    df_raw = pd.read_csv(uploaded)
+    st.success(f"File uploaded: **{uploaded.name}** ({len(df_raw)} rows)")
+
+    # Step 3 — Validation
+    st.subheader("✅ Step 3: Validation")
+    missing = validate_teacher_csv(df_raw)
+    if missing:
+        st.error(f"Missing required columns: `{'`, `'.join(missing)}`")
+        st.write("Please add the missing columns and re-upload.")
+        st.stop()
+    st.success("All required columns present. Processing data…")
+
+    # Step 4 — Process
+    df_proc = process_dataframe(df_raw)
+
+    # Step 5 — Dashboard
+    st.divider()
+    st.subheader("📊 Step 4: Class Overview")
+
+    ov1, ov2, ov3, ov4 = st.columns(4)
+    ov1.metric("Total Students", len(df_proc))
+    ov2.metric("Avg Stress Score", round(df_proc["stress_score"].mean(), 1))
+    ov3.metric("Avg Sleep (hrs)", round(df_proc["daily_sleep_hours"].mean(), 1))
+    ov4.metric("Avg Study (hrs)", round(df_proc["daily_study_hours"].mean(), 1))
+
+    st.write("")
+
+    # Auto insights
+    st.subheader("🔔 Auto Insights")
+    for insight in generate_auto_insights(df_proc):
+        if insight.startswith("✅"):
+            st.success(insight)
+        elif insight.startswith("🚨"):
+            st.error(insight)
+        else:
+            st.warning(insight)
+
+    st.divider()
+
+    # Class-wise analysis
+    st.subheader("📚 Class-wise Analysis")
+    year_order = ["1st", "2nd", "3rd", "4th"]
+    years_present = [y for y in year_order if y in df_proc["year"].values]
+
+    for yr in years_present:
+        grp = df_proc[df_proc["year"] == yr]
+        health = compute_class_health_score(grp)
+        level_counts = grp["stress_level"].value_counts().to_dict()
+        high_n = level_counts.get("High", 0)
+
+        with st.expander(f"📖 {yr} Year — {len(grp)} students | Health Score: {health}/100 | High Risk: {high_n}"):
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("Avg Stress Score", round(grp["stress_score"].mean(), 1))
+            c2.metric("Avg Sleep (hrs)", round(grp["daily_sleep_hours"].mean(), 1))
+            c3.metric("Avg Study (hrs)", round(grp["daily_study_hours"].mean(), 1))
+            c4.metric("Avg Physical Activity", round(grp["physical_activity_hours"].mean(), 2))
+
+            st.markdown("**Class Recommendations:**")
+            for rec in generate_class_recommendations(grp):
+                if rec.startswith("✅"):
+                    st.success(rec)
+                else:
+                    st.warning(rec)
+
+    st.divider()
+
+    # High-risk students
+    st.subheader("🚨 High-Risk Students")
+    high_risk_df = df_proc[df_proc["stress_level"] == "High"]
+    if high_risk_df.empty:
+        st.success("No high-risk students detected.")
+    else:
+        st.error(f"{len(high_risk_df)} student(s) flagged as HIGH stress.")
+        cols_to_show = ["student_id", "name", "year", "stress_score", "daily_sleep_hours",
+                        "daily_study_hours", "recommendation"]
+        show_cols = [c for c in cols_to_show if c in high_risk_df.columns]
+        st.dataframe(high_risk_df[show_cols])
+
+    st.divider()
+
+    # Full student table
+    st.subheader("📋 Full Student Table")
+    extra = ["stress_score", "stress_level", "recommendation"]
+    show_all = [c for c in df_proc.columns if c not in extra] + [c for c in extra if c in df_proc.columns]
+    st.dataframe(df_proc[show_all])
+
+    st.divider()
+
+    # Charts
+    st.subheader("📈 Visual Analytics")
+
+    ch1, ch2 = st.columns(2)
+    with ch1:
+        fig_stress = px.box(
+            df_proc, x="year", y="stress_score", color="year",
+            title="Stress Score by Year",
+            category_orders={"year": year_order},
+        )
+        st.plotly_chart(fig_stress, use_container_width=True)
+    with ch2:
+        fig_sleep = px.box(
+            df_proc, x="year", y="daily_sleep_hours", color="year",
+            title="Sleep Hours by Year",
+            category_orders={"year": year_order},
+        )
+        st.plotly_chart(fig_sleep, use_container_width=True)
+
+    ch3, ch4 = st.columns(2)
+    with ch3:
+        fig_dist = px.histogram(
+            df_proc, x="stress_level", color="stress_level",
+            title="Stress Level Distribution",
+            category_orders={"stress_level": ["Low", "Medium", "High"]},
+            color_discrete_map={"Low": "#2ecc71", "Medium": "#f39c12", "High": "#e74c3c"},
+        )
+        st.plotly_chart(fig_dist, use_container_width=True)
+    with ch4:
+        fig_scatter = px.scatter(
+            df_proc, x="daily_sleep_hours", y="stress_score",
+            color="stress_level", size="daily_study_hours",
+            title="Sleep vs. Stress (size = study hours)",
+            color_discrete_map={"Low": "#2ecc71", "Medium": "#f39c12", "High": "#e74c3c"},
+        )
+        st.plotly_chart(fig_scatter, use_container_width=True)
+
+    st.divider()
+
+    # Export
+    st.subheader("📥 Export Analysed Data")
+    st.download_button(
+        "⬇️ Download Analysed CSV",
+        data=df_proc.to_csv(index=False).encode("utf-8"),
+        file_name="analysed_class_data.csv",
+        mime="text/csv",
+    )
+
+
+# ===========================================================================
+# PAGE 4 — CUSTOM DATA UPLOADER
+# ===========================================================================
+elif page == "📁 4. Custom Data Uploader":
+    st.title("📁 Custom Data Uploader")
+    st.write("Upload any CSV dataset. Optionally apply the stress analysis engine if your data has the required columns.")
+
+    uploaded_file = st.file_uploader("Drop your CSV file here", type=["csv"])
+
+    if uploaded_file is None:
+        st.info("Awaiting CSV upload…")
+        st.stop()
+
+    df_upload = pd.read_csv(uploaded_file)
+    st.success(f"**{uploaded_file.name}** uploaded ({len(df_upload)} rows, {len(df_upload.columns)} columns).")
+
+    # Search
+    st.subheader("🔍 Search Records")
+    columns = df_upload.columns.tolist()
+    sc1, sc2 = st.columns(2)
+    search_col  = sc1.selectbox("Search by column:", columns)
+    search_term = sc2.text_input(f"Search value in '{search_col}':")
+
+    if search_term:
+        filtered = df_upload[df_upload[search_col].astype(str).str.contains(search_term, case=False, na=False)]
+        if not filtered.empty:
+            st.dataframe(filtered)
+        else:
+            st.warning("No matching records found.")
+
+    st.divider()
+
+    with st.expander("👁️ Preview Full Data"):
+        st.dataframe(df_upload.head(20))
+
+    # Optional stress analysis
+    st.subheader("🧠 Optional: Apply Stress Analysis Engine")
+    missing = validate_teacher_csv(df_upload)
+    if missing:
+        st.info(f"Stress analysis requires these additional columns: `{'`, `'.join(missing)}`")
+        apply_analysis = False
+    else:
+        apply_analysis = st.checkbox("✅ Apply stress analysis to this dataset", value=True)
+
+    if apply_analysis:
+        df_analysed = process_dataframe(df_upload)
+        st.success("Stress analysis applied successfully!")
+        st.dataframe(df_analysed)
+
+        # Auto insights
+        st.subheader("🔔 Auto Insights")
+        for insight in generate_auto_insights(df_analysed):
+            if insight.startswith("✅"):
+                st.success(insight)
+            elif insight.startswith("🚨"):
+                st.error(insight)
+            else:
+                st.warning(insight)
+
+        export_df = df_analysed
+    else:
+        export_df = df_upload
+
+    st.divider()
+
+    # Custom chart builder
+    st.subheader("📊 Build Your Own Chart")
+    chart_cols = export_df.columns.tolist()
+    cc1, cc2 = st.columns(2)
+    x_axis = cc1.selectbox("X-Axis", chart_cols, key="x")
+    y_axis = cc2.selectbox("Y-Axis", chart_cols, index=min(1, len(chart_cols) - 1), key="y")
+
+    chart_type = st.selectbox("Chart Type", ["Scatter", "Bar", "Box", "Histogram"])
+
+    if st.button("Generate Chart"):
+        if chart_type == "Scatter":
+            fig_c = px.scatter(export_df, x=x_axis, y=y_axis, title=f"{y_axis} vs {x_axis}")
+        elif chart_type == "Bar":
+            fig_c = px.bar(export_df, x=x_axis, y=y_axis, title=f"{y_axis} by {x_axis}")
+        elif chart_type == "Box":
+            fig_c = px.box(export_df, x=x_axis, y=y_axis, title=f"{y_axis} by {x_axis}")
+        else:
+            fig_c = px.histogram(export_df, x=x_axis, title=f"Distribution of {x_axis}")
+        st.plotly_chart(fig_c, use_container_width=True)
+
+    st.divider()
+
+    # Export
+    st.subheader("📥 Export Data")
+    st.download_button(
+        "⬇️ Download CSV",
+        data=export_df.to_csv(index=False).encode("utf-8"),
+        file_name="exported_data.csv",
+        mime="text/csv",
+    )
